@@ -1,0 +1,102 @@
+repo: https://github.com/elba-kubernetes/experiment.git
+experiments_path: experiments
+username: jazevedo
+profile: MicroblogBareMetalC8220
+options:
+  USERNAME: jazevedo
+  HOSTS_TYPE: physical
+  HARDWARE_TYPE: c8220
+tests:
+  # Bursty workloads
+  - id: ii-rc-b
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 0
+      ENABLE_RADVISOR: 1
+      ENABLE_COLLECTL: 1
+      WORKLOAD_CONFIG: "conf/bursty.yml"
+  - id: ii-c-b
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 0
+      ENABLE_RADVISOR: 0
+      ENABLE_COLLECTL: 1
+      WORKLOAD_CONFIG: "conf/bursty.yml"
+  - id: ii-r-b
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 0
+      ENABLE_RADVISOR: 1
+      ENABLE_COLLECTL: 0
+      WORKLOAD_CONFIG: "conf/bursty.yml"
+  - id: ii-m-b
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 1
+      ENABLE_RADVISOR: 0
+      ENABLE_COLLECTL: 0
+      WORKLOAD_CONFIG: "conf/bursty.yml"
+  - id: ii-mc-b
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 1
+      ENABLE_RADVISOR: 0
+      ENABLE_COLLECTL: 1
+      WORKLOAD_CONFIG: "conf/bursty.yml"
+
+  # Sustained workloads
+  - id: ii-rc-s
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 0
+      ENABLE_RADVISOR: 1
+      ENABLE_COLLECTL: 1
+      WORKLOAD_CONFIG: "conf/sustained.yml"
+  - id: ii-c-s
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 0
+      ENABLE_RADVISOR: 0
+      ENABLE_COLLECTL: 1
+      WORKLOAD_CONFIG: "conf/sustained.yml"
+  - id: ii-r-s
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 0
+      ENABLE_RADVISOR: 1
+      ENABLE_COLLECTL: 0
+      WORKLOAD_CONFIG: "conf/sustained.yml"
+  - id: ii-m-s
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 1
+      ENABLE_RADVISOR: 0
+      ENABLE_COLLECTL: 0
+      WORKLOAD_CONFIG: "conf/sustained.yml"
+  - id: ii-mc-s
+    replicas: 20
+    completed: 15
+    experiment: indirect_response_time
+    options:
+      USE_PATCHED_DOCKER: 1
+      ENABLE_RADVISOR: 0
+      ENABLE_COLLECTL: 1
+      WORKLOAD_CONFIG: "conf/sustained.yml"
