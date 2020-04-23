@@ -1,0 +1,138 @@
+repo: https://github.com/elba-kubernetes/experiment.git
+experiments_path: experiments
+username: jazevedo
+options:
+  USERNAME: jazevedo
+tests:
+    # Direct collectl overhead experiments
+  - id: d
+    replicas: 2
+    experiment: direct_collectl
+    profile: Ubuntu18BareMetalC8220
+    options:
+      HOSTS_TYPE: physical
+      HARDWARE_TYPE: c8220
+    matrix:
+      - name: tools
+        values:
+          - id: rc
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 1
+              ENABLE_COLLECTL: 1
+          - id: r
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 1
+              ENABLE_COLLECTL: 0
+          - id: c
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 1
+          - id: m
+            options:
+              USE_PATCHED_DOCKER: 1
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 0
+          - id: mc
+            options:
+              USE_PATCHED_DOCKER: 1
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 1
+      - name: theoretical_max_cpu
+        values:
+          - id: 50
+            options:
+              CPU_PER_CONTAINER: "0.5"
+          - id: 100
+            options:
+              CPU_PER_CONTAINER: "1.0"
+    # Indirect overhead using synthetic benchmarks
+  - id: i
+    replicas: 2
+    experiment: indirect_throughput
+    profile: Ubuntu18BareMetalC8220
+    options:
+      HOSTS_TYPE: physical
+      HARDWARE_TYPE: c8220
+    matrix:
+      - name: tools
+        values:
+          - id: rc
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 1
+              ENABLE_COLLECTL: 1
+          - id: r
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 1
+              ENABLE_COLLECTL: 0
+          - id: c
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 1
+          - id: m
+            options:
+              USE_PATCHED_DOCKER: 1
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 0
+          - id: mc
+            options:
+              USE_PATCHED_DOCKER: 1
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 1
+      - name: theoretical_max_cpu
+        values:
+          - id: 50
+            options:
+              CPU_PER_CONTAINER: "0.5"
+          - id: 100
+            options:
+              CPU_PER_CONTAINER: "1.0"
+    # Indirect overhead using application benchmark (microblog)
+  - id: ii
+    replicas: 20
+    experiment: indirect_response_time
+    profile: MicroblogBareMetalC8220
+    options:
+      HOSTS_TYPE: physical
+      HARDWARE_TYPE: c8220
+    matrix:
+      - name: tools
+        values:
+          - id: rc
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 1
+              ENABLE_COLLECTL: 1
+          - id: r
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 1
+              ENABLE_COLLECTL: 0
+          - id: c
+            options:
+              USE_PATCHED_DOCKER: 0
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 1
+          - id: m
+            options:
+              USE_PATCHED_DOCKER: 1
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 0
+          - id: mc
+            options:
+              USE_PATCHED_DOCKER: 1
+              ENABLE_RADVISOR: 0
+              ENABLE_COLLECTL: 1
+      - name: workload
+        values:
+          - id: b
+            options:
+              WORKLOAD_CONFIG: "conf/bursty.yml"
+          - id: s
+            options:
+              WORKLOAD_CONFIG: "conf/sustained.yml"

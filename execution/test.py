@@ -7,6 +7,7 @@ import threading
 from os import path
 import pexpect
 from pexpect import pxssh
+from pprint import pformat
 from execution.retry import retry
 from execution.control import wait, stopping
 from execution.log import with_logger, setup_logger
@@ -14,10 +15,12 @@ from execution.exceptions import OperationFailed, ExitEarly
 
 
 class TestReplica:
-    def __init__(self, test_id, options, experiment):
+    def __init__(self, test_id, options, experiment, profile, matrix_ids=None):
         self._id = test_id
         self._options = options
         self._experiment = experiment
+        self._profile = profile
+        self._matrix_ids = matrix_ids
 
     def id(self):  # pylint: disable=invalid-name
         return self._id
@@ -28,8 +31,21 @@ class TestReplica:
     def experiment(self):
         return self._experiment
 
+    def profile(self):
+        return self._profile
+
+    def matrix_ids(self):
+        return self._matrix_ids
+
     def __repr__(self):
-        return f"{self._experiment} ({self._id}):\noptions = {json.dumps(self._options)}"
+        lines = []
+        lines.append(f"experiment: {self._experiment}")
+        lines.append(f"profile: {self._profile}")
+        if self._matrix_ids is not None:
+            lines.append(f"matrix: {pformat(self._matrix_ids)}")
+        lines.append(f"options: {json.dumps(self._options)}")
+        separator = "\n  "
+        return f"Experiment replica ({self._id}):{separator}{separator.join(lines)}"
 
 
 @with_logger
@@ -46,7 +62,7 @@ class TestExecutionThread(threading.Thread):
         self._remote_experiment_path = None
         self._cloudlab_driver = cloudlab
         self._cloudlab_lock = cloudlab_lock
-        self.logger = setup_logger(inner=self.logger, logfile=log_path, name=self._test.id(),
+        self.logger = setup_logger(inner=self.logger, logfile=log_path, name=f"{self._test.id()}-f",
                                    disableStderrLogger=True, colors=False, indent=False)
 
     def transfer(self, local_src=None, local_dest=None, remote_path=None, retry_count=1):
@@ -190,48 +206,58 @@ class TestExecutionThread(threading.Thread):
         self.transfer(local_src=self._config_path, remote_path=remote_config, retry_count=10)
 
     def execute(self):
-        # Attach a remote terminal to the executor host
-        self.info("Attaching a remote terminal to the executor host")
-        ssh = self.terminal(retry_count=10)
+        for current in retry(retry_count=5, task=f'executing experiment {self._test.id()}', logger=self.logger):
+            try:
+                # Attach a remote terminal to the executor host
+                self.info("Attaching a remote terminal to the executor host")
+                ssh = self.terminal(retry_count=10)
 
-        # Clone the repo
-        repo = self._config.get("repo")
-        remote_folder = "repo"
-        self.info("Cloning the repo %s into remote:%s", repo, remote_folder)
-        clone_sequence = [f'sudo rm -rf {remote_folder}',
-                          f'git clone "{repo}" {remote_folder}']
-        self.run_sequence(ssh, sequence=clone_sequence, retry_count=10, timeout=120)
+                # Clone the repo
+                repo = self._config.get("repo")
+                remote_folder = "repo"
+                self.info("Cloning the repo %s into remote:%s", repo, remote_folder)
+                clone_sequence = [f'sudo rm -rf {remote_folder}',
+                                  f'git clone "{repo}" {remote_folder}']
+                self.run_sequence(ssh, sequence=clone_sequence, retry_count=10, timeout=120)
 
-        # Copy the config file into place
-        experiments_path = self._config.get("experiments_path", "experiments")
-        self._remote_experiment_path = path.join(
-            remote_folder,
-            experiments_path,
-            self._test.experiment())
-        remote_config = self._config.get("remote_config", "config.sh")
-        dest_config_path = path.join(
-            self._remote_experiment_path,
-            "conf",
-            remote_config)
-        self.debug("Copy the config file from remote:%s into place at remote:%s",
-                   remote_config, dest_config_path)
-        self.run_sequence(ssh, sequence=[f'mv {remote_config} {dest_config_path}'], retry_count=10)
+                # Copy the config file into place
+                experiments_path = self._config.get("experiments_path", "experiments")
+                self._remote_experiment_path = path.join(
+                    remote_folder,
+                    experiments_path,
+                    self._test.experiment())
+                remote_config = self._config.get("remote_config", "config.sh")
+                dest_config_path = path.join(
+                    self._remote_experiment_path,
+                    "conf",
+                    remote_config)
+                self.debug("Copy the config file from remote:%s into place at remote:%s",
+                           remote_config, dest_config_path)
+                self.run_sequence(
+                    ssh, sequence=[f'cp {remote_config} {dest_config_path}'], retry_count=10)
 
-        # Change the working directory to the experiment root (eventual destination of results)
-        self.debug("Change the working directory to remote:%s", self._remote_experiment_path)
-        self.run_sequence(ssh, sequence=[f'cd {self._remote_experiment_path}'], retry_count=1)
+                # Change the working directory to the experiment root (eventual destination of results)
+                self.debug("Change the working directory to remote:%s",
+                           self._remote_experiment_path)
+                self.run_sequence(
+                    ssh, sequence=[f'cd {self._remote_experiment_path}'], retry_count=1)
 
-        # Run the primary script
-        script_path = './scripts/run.sh'
-        self.info("Running primary script at remote:%s", script_path)
-        ssh.sendline(script_path)
-        while not ssh.prompt(timeout=60):
-            self.debug("\n%s", ssh.before.decode().strip())
-            if ssh.before:
-                ssh.expect(r'.+')
-        self.debug("\n%s", ssh.before.decode().strip())
-        self.info("Finished primary script")
-        ssh.logout()
+                # Run the primary script
+                script_path = './scripts/run.sh'
+                self.info("Running primary script at remote:%s", script_path)
+                ssh.sendline(script_path)
+                while not ssh.prompt(timeout=60):
+                    self.debug("\n%s", ssh.before.decode().strip())
+                    if ssh.before:
+                        ssh.expect(r'.+')
+                self.debug("\n%s", ssh.before.decode().strip())
+                self.info("Finished primary script")
+                ssh.logout()
+                return
+            except ExitEarly:
+                raise
+            except Exception as ex:
+                current.failed(ex)
 
     def teardown(self):
         # Move the results tar to /results/{id}.tar.gz
@@ -259,5 +285,7 @@ class TestExecutionThread(threading.Thread):
                 self._cloudlab_driver.set_logger(old_logger)
 
         # Sleep for 5 minutes between teardown and provisioning
-        if wait(5 * 60):
+        backoff_dur = 5
+        self.info("Sleeping for %d minutes after finished experiment", backoff_dur)
+        if wait(backoff_dur * 60):
             raise ExitEarly()

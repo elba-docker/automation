@@ -3,6 +3,7 @@ Driver for cloudlab.us website interaction and experiment provisioning
 """
 
 import re
+import time
 import urllib
 import traceback
 from selenium import webdriver
@@ -20,9 +21,10 @@ SSH_REGEX = re.compile(r'ssh -p [0-9]+ \S+@(\S+)')
 
 
 class ProvisionedExperiment():
-    def __init__(self, uuid, name):
+    def __init__(self, uuid, name, profile):
         self._uuid = uuid
         self._name = name
+        self._profile = profile
 
     def uuid(self):
         return self._uuid
@@ -30,13 +32,16 @@ class ProvisionedExperiment():
     def name(self):
         return self._name
 
+    def profile(self):
+        return self._profile
+
     def __repr__(self):
-        return f"{self._name} ({self._uuid})"
+        return f"{self._name} ({self._uuid}) profile = {self._profile}"
 
 
 class Experiment(ProvisionedExperiment):
-    def __init__(self, uuid, name, hostnames):
-        ProvisionedExperiment.__init__(self, uuid, name)
+    def __init__(self, uuid, name, profile, hostnames):
+        ProvisionedExperiment.__init__(self, uuid, profile, name)
         self._hostnames = hostnames
 
     def hostnames(self):
@@ -45,7 +50,7 @@ class Experiment(ProvisionedExperiment):
 
 @with_logger
 class Cloudlab():
-    def __init__(self, username, password, profile, headless):
+    def __init__(self, username, password, headless):
         options = Options()
         options.headless = headless
         options.add_argument("window-size=1920,1080")
@@ -54,7 +59,6 @@ class Cloudlab():
         self._username = username
         self._password = password
         self._authenticated = False
-        self._profile = profile
 
     def login(self, retry_count=5):
         driver = self._driver
@@ -119,14 +123,14 @@ class Cloudlab():
 
             # Expand header if collapsed
             try:
-                WebDriverWait(driver, 15).until(expected_conditions.visibility_of_element_located(
+                WebDriverWait(driver, 60).until(expected_conditions.visibility_of_element_located(
                     (By.ID, "terminate_button")))
             except (NoSuchElementException, TimeoutException):
-                WebDriverWait(driver, 15).until(expected_conditions.presence_of_element_located(
+                WebDriverWait(driver, 60).until(expected_conditions.presence_of_element_located(
                     (By.XPATH, "//a[@id='profile_status_toggle']")))
                 driver.find_element(
                     By.XPATH, "//a[@id='profile_status_toggle']").click()
-                WebDriverWait(driver, 15).until(expected_conditions.visibility_of_element_located(
+                WebDriverWait(driver, 60).until(expected_conditions.visibility_of_element_located(
                     (By.ID, "terminate_button")))
                 try:
                     term_button = driver.find_element_by_id("terminate_button")
@@ -141,7 +145,7 @@ class Cloudlab():
                     (By.ID, "terminate_button")))
                 term_button = driver.find_element_by_id("terminate_button")
                 term_button.click()
-                WebDriverWait(driver, 4).until(expected_conditions.element_to_be_clickable(
+                WebDriverWait(driver, 60).until(expected_conditions.element_to_be_clickable(
                     (By.CSS_SELECTOR, "#terminate_modal #terminate")))
                 driver.find_element_by_css_selector(
                     "#terminate_modal #terminate").click()
@@ -151,7 +155,7 @@ class Cloudlab():
                 self.info("Terminated experiment %s", experiment)
                 return
 
-    def provision(self, name=None, expires_in=5, retry_count=5):
+    def provision(self, profile, name=None, expires_in=5, retry_count=5):
         driver = self._driver
         task = f"provision experiment {f'with name {name} ' if name is not None else ''}on Cloudlab"
         for current in retry(retry_count, task=task, logger=self.logger):  # pylint: disable=unexpected-keyword-arg
@@ -176,19 +180,23 @@ class Cloudlab():
                     continue
 
             try:
-                WebDriverWait(driver, 15).until(expected_conditions.element_to_be_clickable(
+                WebDriverWait(driver, 60).until(expected_conditions.element_to_be_clickable(
                     (By.ID, "change-profile")))
                 driver.find_element(By.ID, "change-profile").click()
-                # Wait for page to select initial profile (otherwise the selection will be cleared)
-                WebDriverWait(driver, 15).until(expected_conditions.presence_of_element_located(
-                    (By.CSS_SELECTOR, "li.profile-item.selected")))
+                try:
+                    # Wait for page to select initial profile (otherwise the selection will be cleared)
+                    WebDriverWait(driver, 60).until(expected_conditions.presence_of_element_located(
+                        (By.CSS_SELECTOR, "li.profile-item.selected")))
+                except TimeoutException:
+                    # Ignore timeouts here
+                    pass
                 driver.find_element(
-                    By.XPATH, f"//li[@name='{self._profile}']").click()
-                WebDriverWait(driver, 15).until(expected_conditions.presence_of_element_located(
-                    (By.XPATH, f"//li[@name='{self._profile}' and contains(@class, 'selected')]")))
+                    By.XPATH, f"//li[@name='{profile}']").click()
+                WebDriverWait(driver, 60).until(expected_conditions.presence_of_element_located(
+                    (By.XPATH, f"//li[@name='{profile}' and contains(@class, 'selected')]")))
                 driver.find_element(
                     By.XPATH, "//button[contains(text(),'Select Profile')]").click()
-                WebDriverWait(driver, 30).until(expected_conditions.element_to_be_clickable(
+                WebDriverWait(driver, 60).until(expected_conditions.element_to_be_clickable(
                     (By.LINK_TEXT, "Next")))
                 driver.find_element(By.LINK_TEXT, "Next").click()
 
@@ -198,16 +206,16 @@ class Cloudlab():
                     driver.find_element(
                         By.ID, "experiment_name").send_keys(name)
 
-                WebDriverWait(driver, 15).until(expected_conditions.element_to_be_clickable(
+                WebDriverWait(driver, 60).until(expected_conditions.element_to_be_clickable(
                     (By.LINK_TEXT, "Next")))
                 driver.find_element(By.LINK_TEXT, "Next").click()
-                WebDriverWait(driver, 15).until(expected_conditions.element_to_be_clickable(
+                WebDriverWait(driver, 60).until(expected_conditions.element_to_be_clickable(
                     (By.ID, "experiment_duration")))
                 driver.find_element(By.ID, "experiment_duration").click()
                 driver.find_element(By.ID, "experiment_duration").clear()
                 driver.find_element(
                     By.ID, "experiment_duration").send_keys(str(expires_in))
-                WebDriverWait(driver, 15).until(expected_conditions.element_to_be_clickable(
+                WebDriverWait(driver, 60).until(expected_conditions.element_to_be_clickable(
                     (By.LINK_TEXT, "Finish")))
                 driver.find_element(By.LINK_TEXT, "Finish").click()
             except Exception as ex:
@@ -236,13 +244,15 @@ class Cloudlab():
 
             # Consider the experiment provisioned here, so any failures from here on need
             # to be cleaned up (experiment terminated)
-            WebDriverWait(driver, 60).until(expected_conditions.presence_of_element_located(
-                (By.XPATH, "//td[contains(.,'Name:')]/following-sibling::td")))
-            exp_name = driver.find_element_by_xpath(
-                "//td[contains(.,'Name:')]/following-sibling::td").text
+            name_xpath = "//td[contains(.,'Name:')]/following-sibling::td"
+            WebDriverWait(driver, 60).until(
+                expected_conditions.presence_of_element_located((By.XPATH, name_xpath)))
+            WebDriverWait(driver, 60).until(
+                lambda driver: driver.find_element_by_xpath(name_xpath).text.strip() != '')
+            exp_name = driver.find_element_by_xpath(name_xpath).text
             url_parts = urllib.parse.urlparse(driver.current_url)
             uuid = urllib.parse.parse_qs(url_parts.query).get("uuid")[0]
-            experiment = ProvisionedExperiment(uuid, exp_name)
+            experiment = ProvisionedExperiment(uuid=uuid, name=exp_name, profile=profile)
             self.info(f"Instantiating experiment {experiment}")
 
             # Wait on status until "ready" or something else
@@ -254,7 +264,7 @@ class Cloudlab():
             failed = False
             while status != "ready":
                 try:
-                    WebDriverWait(driver, 4).until(
+                    WebDriverWait(driver, 60).until(
                         expected_conditions.text_to_be_present_in_element((By.XPATH, status_xpath),
                                                                           "ready"))
                 except TimeoutException:
@@ -293,7 +303,7 @@ class Cloudlab():
 
             try:
                 # Navigate to list panel
-                WebDriverWait(driver, 15).until(
+                WebDriverWait(driver, 60).until(
                     expected_conditions.visibility_of_element_located((By.ID, "show_listview_tab")))
                 driver.find_element(By.ID, "show_listview_tab").click()
             except (TimeoutException, NoSuchElementException) as ex:
@@ -325,7 +335,7 @@ class Cloudlab():
                     hostnames.append(match_obj.group(1))
 
             # Experiment successfully provisioned, hostnames extracted
-            return Experiment(experiment.uuid(), experiment.name(), hostnames)
+            return Experiment(experiment.uuid(), experiment.name(), experiment.profile(), hostnames)
 
     def safe_terminate(self, experiment, retry_count=5):
         try:
@@ -340,7 +350,7 @@ class Cloudlab():
         top_status = driver.find_element_by_id("status_message").text
         if top_status == "Something went wrong!":
             try:
-                WebDriverWait(driver, 15).until(
+                WebDriverWait(driver, 60).until(
                     expected_conditions.visibility_of_element_located((By.ID, "error_panel")))
             except TimeoutException:
                 return None

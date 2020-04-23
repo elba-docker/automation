@@ -6,14 +6,18 @@ Automation script for running cloudlab experiments
 
 import re
 import sys
+import os
+import copy
 import traceback
 import getpass
 import signal
 import threading
 from os import path
 from pathlib import Path
+from typing import *
 import click
 import yaml
+from deepmerge import always_merger
 from execution.retry import retry
 from execution.cloudlab import Cloudlab
 from execution.log import log, setup_logger
@@ -23,6 +27,7 @@ from execution.exceptions import OperationFailed, ExitEarly
 
 
 HOST_CONFIG_REGEX = re.compile(r'(?m)^((?:readonly )?[A-Z_]+_HOSTS?)="?.*"?$')
+RESULT_TAR_REGEX = re.compile(r'(?:^|.*/{1,2})(.+)-(\d+)\.tar\.gz$')
 thread_queue = []  # pylint: disable=invalid-name
 cloudlab = None  # pylint: disable=invalid-name
 cloudlab_lock = threading.Lock()  # pylint: disable=invalid-name
@@ -39,7 +44,8 @@ cloudlab_lock = threading.Lock()  # pylint: disable=invalid-name
               default=None, required=False)
 @click.option("--headless/--no-headless", prompt="Run chrome driver in headless mode",
               default=False)
-def main(config=None, repo_path=None, cert=None, threads=None, password=None, headless=False):
+def main(config: str = None, repo_path: str = None, cert: str = None, threads: str = None, password:
+         str = None, headless: str = False) -> None:
     if config is None:
         return
 
@@ -62,7 +68,7 @@ def main(config=None, repo_path=None, cert=None, threads=None, password=None, he
     run(config_dict, repo_path)
 
 
-def run(config, repo_path):
+def run(config: Dict[str, Any], repo_path: str) -> None:
     log.info("Starting automated experiment execution")
     if "tests" not in config or not config["tests"]:
         log.error("No tests found. Exiting")
@@ -90,10 +96,6 @@ def run(config, repo_path):
     if username is None:
         log.error("Cloudlab experiment username not specified")
         return
-    profile = config.get("profile")
-    if profile is None:
-        log.error("Cloudlab experiment profile not specified")
-        return
 
     # Load Cloudlab password
     if 'password_path' in config:
@@ -111,9 +113,9 @@ def run(config, repo_path):
     # Instantiate the driver
     headless = bool(config.get("headless"))
     global cloudlab  # pylint: disable=global-statement, invalid-name
-    log.info("Initializing %s cloudlab driver for %s with profile %s",
-             'headless' if headless else 'gui', username, profile)
-    cloudlab = Cloudlab(username, password, profile, headless)
+    log.info("Initializing %s cloudlab driver for %s",
+             'headless' if headless else 'gui', username)
+    cloudlab = Cloudlab(username, password, headless)
 
     # Attempt to log in
     with cloudlab_lock:
@@ -138,7 +140,7 @@ def run(config, repo_path):
     max_concurrency = config.get("max_concurrency", 1)
 
     for test in tests:
-        test_logger = setup_logger(inner=log, prefix=f"[{test.id()}] ")
+        test_logger = setup_logger(name=test.id(), inner=log, prefix=f"[{test.id()}] ")
         try:
             for current in retry(task=f"executing test {test.id()}", retry_count=5, logger=test_logger):  # pylint: disable=unexpected-keyword-arg
                 # Make sure there aren't more than `max_concurrency` tests executing
@@ -185,7 +187,7 @@ def conduct_test(test, current, config, experiments_dir, logger):
             logger.info("Provisioning new experiment from cloudlab")
             old_logger = cloudlab.logger
             cloudlab.set_logger(logger)
-            experiment = cloudlab.provision()
+            experiment = cloudlab.provision(profile=test.profile(), name=test.id())
         except ExitEarly:
             raise
         except OperationFailed as ex:
@@ -207,10 +209,7 @@ def conduct_test(test, current, config, experiments_dir, logger):
     hosts = experiment.hostnames()
     executor_host = hosts[0]
     experiment_hosts = hosts[1:]
-
-    def replace_host(match):
-        return f'{match.group(1)}="{experiment_hosts.pop(0)}"'
-    test_config = re.sub(HOST_CONFIG_REGEX, replace_host, test_config)
+    hostname_options = assign_hosts(test_config, experiment_hosts)
 
     def replace_value(value):
         def replace_inner(match):
@@ -222,9 +221,9 @@ def conduct_test(test, current, config, experiments_dir, logger):
         return replace_inner
 
     # Then, replace overrides
-    for (key, value) in test.options().items():
+    options = {**test.options(), **hostname_options}
+    for (key, value) in options.items():
         key_regex = re.compile(f'(?m)^((?:readonly )?{key})="?.*"?$')
-
         test_config = re.sub(key_regex, replace_value(value), test_config)
 
     # Create working directory
@@ -256,18 +255,104 @@ def conduct_test(test, current, config, experiments_dir, logger):
     return True
 
 
-def flatten_tests(config):
+def assign_hosts(config_sh, hosts):
+    assignments = {}
+    host_fields = [match.group(1) for match in re.finditer(HOST_CONFIG_REGEX, config_sh)]
+    num_hosts = len(hosts)
+    num_fields = len(host_fields)
+    hosts_per = num_hosts // num_fields
+    hosts_extra = num_hosts % num_fields
+    host_pool = hosts[:]
+    for i, host_field in enumerate(host_fields):
+        hosts_for_field = []
+        for _ in range(hosts_per):
+            hosts_for_field.append(host_pool.pop(0))
+        # Add extra
+        if i < hosts_extra:
+            hosts_for_field.append(host_pool.pop(0))
+        assignments[host_field] = hosts_for_field
+    return {key: " ".join(value) for (key, value) in assignments.items()}
+
+
+def flatten_tests(config: Dict[str, Any]) -> List[TestReplica]:
     """
-    Flattens test replicas into a single list of Tests
+    Flattens test replicas into a single list of TestReplicas
     """
 
     tests = config.get("tests", [])
     global_options = config.get("options", {})
+    flattened = flatten_globals(tests, global_options)
+    flattened = flatten_matrices(flattened)
+    flattened = flatten_replicas(flattened)
+    return flattened
 
+
+def flatten_globals(tests: List[Dict[str, Any]],
+                    global_options: Dict[str, Any]) -> List[Dict[str, Any]]:
+    flattened = []
+    for test_set in tests:
+        options = {**test_set.get("options", {}), **global_options}
+        test_set_new = test_set.copy()
+        test_set_new["options"] = options
+        flattened.append(test_set_new)
+    return flattened
+
+
+def flatten_matrices(tests: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    flattened = []
+    for test_set in tests:
+        if "matrix" in test_set:
+            # Perform matrix config expansion
+            intermediate = [test_set]
+            dimensions = test_set["matrix"]
+            for dimension in dimensions:
+                name = dimension.get("name", "unknown")
+                values = dimension.get("values", [])
+                if not values:
+                    continue
+
+                new_intermediate = []
+                # Expand the current working set
+                for partial_config in values:
+                    for test in intermediate:
+                        test_id = test.get('id', None)
+                        if not test_id:
+                            break
+
+                        value_id = partial_config.get('id', None)
+                        if not value_id:
+                            continue
+
+                        new_id = f"{test_id}-{value_id}"
+                        new_test = copy.deepcopy(test)
+                        always_merger.merge(new_test, partial_config)
+
+                        # Overwite ID
+                        new_test["id"] = new_id
+
+                        # Merge in matrix choice id
+                        if "matrix_ids" not in new_test:
+                            new_test["matrix_ids"] = {}
+                        partial_matrix_ids = {}
+                        partial_matrix_ids[name] = value_id
+                        always_merger.merge(new_test["matrix_ids"], partial_matrix_ids)
+
+                        new_intermediate.append(new_test)
+                intermediate = new_intermediate
+            flattened.extend(intermediate)
+        else:
+            flattened.append(test_set)
+    return flattened
+
+
+def flatten_replicas(tests: List[Dict[str, Any]]) -> List[TestReplica]:
     replicas_len = (len(str(test_set.get("replicas", 1))) for test_set in tests)
     # Use minimum id number of 2
     id_length = max(max(replicas_len), 2)
     test_id_fmt = f"{{}}-{{:0{id_length}}}"
+
+    # Get list of completed tests to skip
+    completed_tests = get_completed_tests("results")
 
     flattened = []
     for test_set in tests:
@@ -275,15 +360,57 @@ def flatten_tests(config):
         experiment = test_set["experiment"]
         replicas = test_set.get("replicas", 1)
         completed = test_set.get("completed", 0)
-        options = {**test_set.get("options", {}), **global_options}
+        profile = test_set.get("profile", None)
+        options = test_set.get("options", {})
+        matrix_ids = test_set.get("matrix_ids", None)
+
         for i in range(replicas - completed):
             j = i + completed
+            # Make sure test hasn't been completed
+            if test_id in completed_tests and j in completed_tests[test_id]:
+                continue
+
             test_run_id = test_id_fmt.format(test_id, j)
-            flattened.append(TestReplica(test_run_id, options, experiment))
+            flattened.append(TestReplica(test_id=test_run_id, options=options,
+                                         experiment=experiment, profile=profile,
+                                         matrix_ids=matrix_ids))
     return flattened
 
 
-def load_config(config_path):
+def get_completed_tests(results_dir):
+    completed_tests = {}
+    try:
+        files = find_files(results_dir, ".tar.gz")
+        for f in files:
+            filename = os.path.basename(f)
+            match_obj = re.search(RESULT_TAR_REGEX, filename)
+            if match_obj:
+                test_id = match_obj.group(1)
+                test_replica = int(match_obj.group(2))
+                if test_id not in completed_tests:
+                    completed_tests[test_id] = set()
+                completed_tests[test_id].add(test_replica)
+    except OSError:
+        log.warning(
+            "Could not detect completed experiments. Falling back to 'completed' value in test configs")
+    return completed_tests
+
+
+def find_files(path: str, extension: str) -> List[str]:
+    """
+    Gets a list of every file in the given path that has the given file extension
+    """
+
+    file_list = []
+    for root, _, files in os.walk(path):
+        for file in files:
+            if file.endswith(extension):
+                file_list.append(os.path.join(root, file))
+
+    return file_list
+
+
+def load_config(config_path: str) -> Dict[str, Any]:
     """
     Loads the config YAML file
     """
