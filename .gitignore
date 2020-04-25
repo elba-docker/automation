@@ -5,3 +5,4 @@
 /migrated/
 __pycache__
 passwd
+.venv
