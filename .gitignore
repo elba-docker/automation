@@ -4,5 +4,6 @@
 /archive/
 /migrated/
 __pycache__
-passwd
+passwd*
+id_rsa*
 .venv

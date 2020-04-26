@@ -1,13 +1,12 @@
 repo: https://github.com/elba-kubernetes/experiment.git
 experiments_path: experiments
-username: jazevedo
+username: unahb
 options:
-  USERNAME: jazevedo
+  USERNAME: unahb
 tests:
     # Direct collectl overhead experiments
   - id: d
-    replicas: 2
-    completed: 1
+    replicas: 3
     experiment: direct_collectl
     profile: Ubuntu18BareMetalC8220
     options:
@@ -51,8 +50,7 @@ tests:
               CPU_PER_CONTAINER: "1.0"
     # Indirect overhead using synthetic benchmarks
   - id: i
-    replicas: 2
-    completed: 1
+    replicas: 3
     experiment: indirect_throughput
     profile: Ubuntu18BareMetalC8220
     options:
@@ -96,8 +94,7 @@ tests:
               CPU_PER_CONTAINER: "1.0"
     # Indirect overhead using application benchmark (microblog)
   - id: ii
-    replicas: 20
-    completed: 10
+    replicas: 30
     experiment: indirect_response_time
     profile: MicroblogBareMetalC8220
     options:
