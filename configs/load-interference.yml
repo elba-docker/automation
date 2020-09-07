@@ -1,0 +1,20 @@
+repo: https://github.com/elba-docker/experiment.git
+experiments_path: experiments
+username: jazevedo
+options:
+  USERNAME: jazevedo
+tests:
+    # Experiment to test the performance of rAdvisor during load interference
+  - id: li
+    replicas: 1
+    experiment: load_interference
+    profile: MicroblogBareMetalD430
+    options:
+      HOSTS_TYPE: physical
+      HARDWARE_TYPE: d430
+      # Experiment parameters
+      T_RAMP: 20
+      T_BUFFER: 10
+      T_NO_INTERFERENCE: 200
+      T_INTERFERENCE: 200
+      CPU_PER_STRESS_CONTAINER: 1.0
