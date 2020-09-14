@@ -9,6 +9,7 @@ tests:
     replicas: 1
     experiment: load_interference
     profile: MicroblogBareMetalD430
+    branch: feature/load-interference
     options:
       HOSTS_TYPE: physical
       HARDWARE_TYPE: d430
@@ -18,3 +19,4 @@ tests:
       T_NO_INTERFERENCE: 200
       T_INTERFERENCE: 200
       CPU_PER_STRESS_CONTAINER: 1.0
+      WISE_DEBUG: 1

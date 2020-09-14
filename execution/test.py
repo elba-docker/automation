@@ -15,12 +15,16 @@ from execution.exceptions import OperationFailed, ExitEarly
 
 
 class TestReplica:
-    def __init__(self, test_id, options, experiment, profile, matrix_ids=None):
+    def __init__(self, test_id, options, experiment, profile, matrix_ids=None, config={}):
         self._id = test_id
         self._options = options
         self._experiment = experiment
         self._profile = profile
         self._matrix_ids = matrix_ids
+        self._config = config
+
+    def config(self):
+        return self._config
 
     def id(self):  # pylint: disable=invalid-name
         return self._id
@@ -44,6 +48,7 @@ class TestReplica:
         if self._matrix_ids is not None:
             lines.append(f"matrix: {pformat(self._matrix_ids)}")
         lines.append(f"options: {json.dumps(self._options)}")
+        lines.append(f"config: {json.dumps(self._config)}")
         separator = "\n  "
         return f"Experiment replica ({self._id}):{separator}{separator.join(lines)}"
 
@@ -57,7 +62,8 @@ class TestExecutionThread(threading.Thread):
         self._hostname = hostname
         self._config_path = config_path
         self._results_path = results_path
-        self._config = config
+        # Merge the test config & the global config
+        self._config = {**config, **test.config()}
         self._experiment = experiment
         self._remote_experiment_path = None
         self._cloudlab_driver = cloudlab
@@ -216,8 +222,16 @@ class TestExecutionThread(threading.Thread):
                 repo = self._config.get("repo")
                 remote_folder = "repo"
                 self.info("Cloning the repo %s into remote:%s", repo, remote_folder)
+
+                # Build the git command with optional branch support
+                git_command = ["git", "clone"]
+                branch = self._config.get("branch", None)
+                if branch:
+                    git_command.extend(["--single-branch", "--branch", f'"{branch}"'])
+                git_command.extend([f'"{repo}"', remote_folder])
+
                 clone_sequence = [f'sudo rm -rf {remote_folder}',
-                                  f'git clone "{repo}" {remote_folder}']
+                                  ' '.join(git_command)]
                 self.run_sequence(ssh, sequence=clone_sequence, retry_count=10, timeout=120)
 
                 # Copy the config file into place

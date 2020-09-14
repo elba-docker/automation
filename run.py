@@ -363,6 +363,9 @@ def flatten_replicas(tests: List[Dict[str, Any]]) -> List[TestReplica]:
         profile = test_set.get("profile", None)
         options = test_set.get("options", {})
         matrix_ids = test_set.get("matrix_ids", None)
+        # Extract all additional values as the config
+        config = {k:v for k,v in test_set.items() if k not in [
+            "id", "experiment", "replicas", "completed", "profile", "options", "matrix_ids"]}
 
         for i in range(replicas - completed):
             j = i + completed
@@ -373,7 +376,7 @@ def flatten_replicas(tests: List[Dict[str, Any]]) -> List[TestReplica]:
             test_run_id = test_id_fmt.format(test_id, j)
             flattened.append(TestReplica(test_id=test_run_id, options=options,
                                          experiment=experiment, profile=profile,
-                                         matrix_ids=matrix_ids))
+                                         matrix_ids=matrix_ids, config=config))
     return flattened
 
 
