@@ -16,7 +16,20 @@ tests:
       # Experiment parameters
       T_RAMP: 20
       T_BUFFER: 10
-      T_NO_INTERFERENCE: 200
-      T_INTERFERENCE: 200
+      T_COLLECTION: 200
       CPU_PER_STRESS_CONTAINER: 1.0
+      NUMBER_SESSIONS: 135
+      RADVISOR_NICENESS: -1
+      COLLECTL_NICENESS: -1
+      ENABLE_COLLECTL: 1
+      ENABLE_RADVISOR: 1
       WISE_DEBUG: 1
+    matrix:
+      - name: enable_load
+        values:
+          - id: l
+            options:
+              ENABLE_LOAD_INTERFERENCE: 1
+          - id: nl
+            options:
+              ENABLE_LOAD_INTERFERENCE: 0
